@@ -404,10 +404,10 @@ overrides: !ruby/object:Overrides::ResourceOverrides
         required: false
         default_from_api: true
   Disk: !ruby/object:Overrides::Terraform::ResourceOverride
-    # Larger disks were timing out at creation. Bumping up to 5 minutes.
+    # Larger disks were timing out at creation. Bumping up to 8 minutes.
     # https://github.com/hashicorp/terraform-provider-google/issues/703
     timeouts: !ruby/object:Api::Timeouts
-      insert_minutes: 5
+      insert_minutes: 8
     properties:
       id: !ruby/object:Overrides::Terraform::PropertyOverride
         exclude: true
