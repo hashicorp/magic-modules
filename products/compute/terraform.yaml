@@ -2066,7 +2066,7 @@ overrides: !ruby/object:Overrides::ResourceOverrides
     exclude: true
   Snapshot: !ruby/object:Overrides::Terraform::ResourceOverride
     timeouts: !ruby/object:Api::Timeouts
-      insert_minutes: 5
+      insert_minutes: 10
       update_minutes: 5
       delete_minutes: 5
     create_url: projects/{{project}}/zones/{{zone}}/disks/{{source_disk}}/createSnapshot
