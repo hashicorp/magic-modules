@@ -149,8 +149,30 @@ func bigQueryTableMapKeyOverride(key string, objectA, objectB map[string]interfa
 	return false
 }
 
+func getColumnsFromUriPrefix(sourceUriPrefix string) []interface{} {
+	// gs://myBucket/myTable/{dt:DATE}/{val:STRING}
+	re := regexp.MustCompile(`{\w*:\w*}`)
+
+	def := re.FindAllString(sourceUriPrefix, -1)
+	cols := []interface{}{}
+	for _, c := range def {
+		parts := strings.Split(strings.Trim(c, "{}"), ":")
+
+		name := parts[0]
+		colType := parts[1]
+
+		cols = append(cols, map[string]interface{}{
+			"name": name,
+			"type": strings.ToUpper(colType),
+			"mode": "NULLABLE",
+		})
+	}
+
+	return cols
+}
+
 // Compare the JSON strings are equal
-func bigQueryTableSchemaDiffSuppress(name, old, new string, _ *schema.ResourceData) bool {
+func bigQueryTableSchemaDiffSuppress(name, old, new string, d *schema.ResourceData) bool {
 	// The API can return an empty schema which gets encoded to "null" during read.
 	if old == "null" {
 		old = "[]"
@@ -167,6 +189,19 @@ func bigQueryTableSchemaDiffSuppress(name, old, new string, _ *schema.ResourceDa
 	if err != nil {
 		log.Printf("[DEBUG] %v", err)
 		log.Printf("[DEBUG] Error comparing JSON: %v, %v", old, new)
+	}
+
+	if v, ok := d.GetOk("external_data_configuration"); ok {
+		edc := v.([]interface{})[0].(map[string]interface{})
+
+		hpo := edc["hive_partitioning_options"].([]interface{})
+		if len(hpo) > 0 {
+			if sourceUriPrefix, ok := hpo[0].(map[string]interface{})["source_uri_prefix"].(string); ok {
+				cols := getColumnsFromUriPrefix(sourceUriPrefix)
+				b = append(b.([]interface{}), cols...)
+				eq, err = jsonCompareWithMapKeyOverride(name, a, b, bigQueryTableMapKeyOverride)
+			}
+		}
 	}
 
 	return eq
@@ -324,6 +359,22 @@ func resourceBigQueryTableSchemaCustomizeDiffFunc(d TerraformResourceDiff) error
 			// same as above
 			log.Printf("[DEBUG] unable to unmarshal json customized diff - %v", err)
 		}
+
+		if v, ok := d.GetOk("external_data_configuration"); ok {
+			edc := v.([]interface{})[0].(map[string]interface{})
+
+			hpo := edc["hive_partitioning_options"].([]interface{})
+			if len(hpo) > 0 {
+				if sourceUriPrefix, ok := hpo[0].(map[string]interface{})["source_uri_prefix"].(string); ok {
+					cols := getColumnsFromUriPrefix(sourceUriPrefix)
+
+					if len(cols) > len(new.([]interface{})) {
+						return nil
+					}
+				}
+			}
+		}
+
 		isChangeable, err := resourceBigQueryTableSchemaIsChangeable(old, new)
 		if err != nil {
 			return err
