@@ -21,7 +21,7 @@ func TestAccDataSourceDnsManagedZone_basic(t *testing.T) {
 
 	vcrTest(t, resource.TestCase{
 		PreCheck: func() { testAccPreCheck(t) },
-		// CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducerFramework(t),
 		Steps: []resource.TestStep{
 			{
 				ExternalProviders: providerVersion450(),
