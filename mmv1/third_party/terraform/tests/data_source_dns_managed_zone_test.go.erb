@@ -36,7 +36,7 @@ func TestAccDataSourceDnsManagedZone_basic(t *testing.T) {
 							"peering_config.#":                      {},
 							"forwarding_config.#":                   {},
 							"force_destroy":                         {},
-							"labels.#":                              {},
+							// "labels.#":                              {}, // There isn't a labels attribute in the resource's state when run with SDK-only provider
 							"creation_time":                         {},
 							"cloud_logging_config.#":                {},
 							"cloud_logging_config.0.%":              {},
@@ -62,7 +62,7 @@ func TestAccDataSourceDnsManagedZone_basic(t *testing.T) {
 							"peering_config.#":                      {},
 							"forwarding_config.#":                   {},
 							"force_destroy":                         {},
-							"labels.%":                              {}, // Note - requires change from labels.# to labels.% for muxed provider
+							"labels.%":                              {}, // Note - labels.% attribute is only present when test run with the muxed provider
 							"creation_time":                         {},
 							"cloud_logging_config.#":                {},
 							"cloud_logging_config.0.%":              {},
