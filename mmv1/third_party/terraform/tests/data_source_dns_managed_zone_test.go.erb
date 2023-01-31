@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-go/tfprotov5"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
@@ -14,46 +13,77 @@ import (
 func TestAccDataSourceDnsManagedZone_basic(t *testing.T) {
 	t.Parallel()
 
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	var dns_name1, dns_name2 string
+
 	vcrTest(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		ProtoV5ProviderFactories: map[string]func() (tfprotov5.ProviderServer, error){
-			"google": func() (tfprotov5.ProviderServer, error) {
-				provider, err := MuxedProviders(t.Name())
-				return provider(), err
-			},
-		},
+		PreCheck: func() { testAccPreCheck(t) },
 		// CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceDnsManagedZone_basic(randString(t, 10)),
-				Check: checkDataSourceStateMatchesResourceStateWithIgnores(
-					"data.google_dns_managed_zone.qa",
-					"google_dns_managed_zone.foo",
-					map[string]struct{}{
-						"dnssec_config.#":                       {},
-						"private_visibility_config.#":           {},
-						"peering_config.#":                      {},
-						"forwarding_config.#":                   {},
-						"force_destroy":                         {},
-						"labels.#": 				                     {},
-						"creation_time": 			                   {},
-						"cloud_logging_config.#":                {},
-						"cloud_logging_config.0.%":              {},
-						"cloud_logging_config.0.enable_logging": {},
+				ExternalProviders: providerVersion450(),
+				Config:            testAccDataSourceDnsManagedZone_basic(context),
+				Check: resource.ComposeTestCheckFunc(
+					checkDataSourceStateMatchesResourceStateWithIgnores(
+						"data.google_dns_managed_zone.qa",
+						"google_dns_managed_zone.foo",
+						map[string]struct{}{
+							"dnssec_config.#":                       {},
+							"private_visibility_config.#":           {},
+							"peering_config.#":                      {},
+							"forwarding_config.#":                   {},
+							"force_destroy":                         {},
+							"labels.#":                              {},
+							"creation_time":                         {},
+							"cloud_logging_config.#":                {},
+							"cloud_logging_config.0.%":              {},
+							"cloud_logging_config.0.enable_logging": {},
 <% unless version == "ga" -%>
-						"reverse_lookup":                        {},
+							"reverse_lookup":                        {},
 <% end -%>
-					},
+						},
+					),
+					testExtractResourceAttr("data.google_dns_managed_zone.qa", "dns_name", &dns_name1),
+				),
+			},
+			{
+				ProtoV5ProviderFactories: protoV5ProviderFactories(t),
+				Config:                   testAccDataSourceDnsManagedZone_basic(context),
+				Check: resource.ComposeTestCheckFunc(
+					checkDataSourceStateMatchesResourceStateWithIgnores(
+						"data.google_dns_managed_zone.qa",
+						"google_dns_managed_zone.foo",
+						map[string]struct{}{
+							"dnssec_config.#":                       {},
+							"private_visibility_config.#":           {},
+							"peering_config.#":                      {},
+							"forwarding_config.#":                   {},
+							"force_destroy":                         {},
+							"labels.%":                              {}, // Note - requires change from labels.# to labels.% for muxed provider
+							"creation_time":                         {},
+							"cloud_logging_config.#":                {},
+							"cloud_logging_config.0.%":              {},
+							"cloud_logging_config.0.enable_logging": {},
+<% unless version == "ga" -%>
+							"reverse_lookup":                        {},
+<% end -%>
+						},
+					),
+					testExtractResourceAttr("data.google_dns_managed_zone.qa", "dns_name", &dns_name2),
+					testCheckAttributeValuesEqual(&dns_name1, &dns_name2),
 				),
 			},
 		},
 	})
 }
 
-func testAccDataSourceDnsManagedZone_basic(managedZoneName string) string {
-	return fmt.Sprintf(`
+func testAccDataSourceDnsManagedZone_basic(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_dns_managed_zone" "foo" {
-  name        = "qa-zone-%s"
+  name        = "tf-test-zone-%{random_suffix}"
   dns_name    = "qa.tf-test.club."
   description = "QA DNS zone"
 }
@@ -61,7 +91,7 @@ resource "google_dns_managed_zone" "foo" {
 data "google_dns_managed_zone" "qa" {
   name = google_dns_managed_zone.foo.name
 }
-`, managedZoneName)
+`, context)
 }
 
 // testAccCheckDNSManagedZoneDestroyProducerFramework is the framework version of the generated testAccCheckDNSManagedZoneDestroyProducer
