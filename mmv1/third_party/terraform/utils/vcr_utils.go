@@ -426,6 +426,7 @@ func configureApiClient(ctx context.Context, p *frameworkProvider, diags *fwDiag
 		return
 	}
 	p.LoadAndValidateFramework(ctx, data, "test", diags)
+}
 
 // GetSDKProvider gets the SDK provider with an overwritten configure function to be called by MuxedProviders
 func GetSDKProvider(testName string) *schema.Provider {
