@@ -3,13 +3,14 @@ package google
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-framework/path"
+	"strings"
 
 	"google.golang.org/api/dns/v1"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -18,8 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
-	"github.com/hashicorp/terraform-provider-google/google/tpgresource"
-	transport_tpg "github.com/hashicorp/terraform-provider-google/google/transport"
+	"github.com/hashicorp/terraform-provider-google-beta/google-beta/tpgresource"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -33,8 +33,8 @@ func NewGoogleDnsRecordSetResource() resource.Resource {
 
 // GoogleDnsRecordSetResource defines the resource implementation.
 type GoogleDnsRecordSetResource struct {
-	client  *dns.Service
-	project types.String
+	client   *dns.Service
+	project  types.String
 	provider *frameworkProvider
 }
 
@@ -248,7 +248,6 @@ func (r *GoogleDnsRecordSetResource) Schema(ctx context.Context, req resource.Sc
 func (r *GoogleDnsRecordSetResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data GoogleDnsRecordSetResourceModel
 	var metaData *ProviderMetaModel
-	var diags diag.Diagnostics
 
 	// Read Provider meta into the meta model
 	resp.Diagnostics.Append(req.ProviderMeta.Get(ctx, &metaData)...)
@@ -259,7 +258,7 @@ func (r *GoogleDnsRecordSetResource) Create(ctx context.Context, req resource.Cr
 	r.client.UserAgent = generateFrameworkUserAgentString(metaData, r.client.UserAgent)
 
 	// Read Terraform configuration data into the model
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -341,36 +340,6 @@ func (r *GoogleDnsRecordSetResource) Create(ctx context.Context, req resource.Cr
 
 	tflog.Trace(ctx, "created dns record set resource")
 
-	clientResp, err := r.client.ResourceRecordSets.List(data.Project.ValueString(), data.ManagedZone.ValueString()).Name(data.Name.ValueString()).Type(data.Type.ValueString()).Do()
-	if err != nil {
-		handleResourceNotFoundError(ctx, err, &resp.State, fmt.Sprintf("resourceDnsRecordSet %q", data.Name.ValueString()), &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	if len(clientResp.Rrsets) != 1 {
-		resp.Diagnostics.AddError("expected 1 record set", fmt.Sprintf("%d record sets were returned", len(clientResp.Rrsets)))
-		return
-	}
-
-	tflog.Trace(ctx, "read dns record set resource")
-
-	data.Type = types.StringValue(clientResp.Rrsets[0].Type)
-	data.Ttl = types.Int64Value(clientResp.Rrsets[0].Ttl)
-	data.Rrdatas, diags = types.ListValueFrom(ctx, types.StringType, clientResp.Rrsets[0].Rrdatas)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if clientResp.Rrsets[0].RoutingPolicy != nil {
-		data.RoutingPolicy, diags = types.ListValueFrom(ctx, data.RoutingPolicy.ElementType(ctx), []*dns.RRSetRoutingPolicy{clientResp.Rrsets[0].RoutingPolicy})
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -432,7 +401,7 @@ func (r *GoogleDnsRecordSetResource) Read(ctx context.Context, req resource.Read
 		return
 	}
 	if clientResp.Rrsets[0].RoutingPolicy != nil {
-		data.RoutingPolicy, diags = types.ListValueFrom(ctx, data.RoutingPolicy.ElementType(ctx), []*dns.RRSetRoutingPolicy{clientResp.Rrsets[0].RoutingPolicy})
+		data.RoutingPolicy = flattenDnsRecordSetRoutingPolicy(ctx, data.RoutingPolicy, clientResp.Rrsets[0].RoutingPolicy, &resp.Diagnostics)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -444,7 +413,7 @@ func (r *GoogleDnsRecordSetResource) Read(ctx context.Context, req resource.Read
 }
 
 func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var configData GoogleDnsRecordSetResourceModel
+	var planData GoogleDnsRecordSetResourceModel
 	var stateData GoogleDnsRecordSetResourceModel
 	var metaData *ProviderMetaModel
 	var diags diag.Diagnostics
@@ -458,7 +427,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 	r.client.UserAgent = generateFrameworkUserAgentString(metaData, r.client.UserAgent)
 
 	// Read Terraform configuration data into the model
-	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &planData)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -469,7 +438,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 		return
 	}
 
-	configData.Project = getProjectFramework(configData.Project, r.project, &resp.Diagnostics)
+	planData.Project = getProjectFramework(planData.Project, r.project, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -479,7 +448,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 		return
 	}
 
-	configRrdatas := expandDnsRecordSetRrdata(ctx, configData.Rrdatas, &resp.Diagnostics)
+	configRrdatas := expandDnsRecordSetRrdata(ctx, planData.Rrdatas, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -489,7 +458,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 	//	return
 	//}
 
-	configRoutingPolicy := expandDnsRecordSetRoutingPolicy(ctx, r.provider, configData.RoutingPolicy, &resp.Diagnostics)
+	configRoutingPolicy := expandDnsRecordSetRoutingPolicy(ctx, r.provider, planData.Project, planData.RoutingPolicy, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -507,8 +476,8 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 		Additions: []*dns.ResourceRecordSet{
 			{
 				Name:          stateData.Name.ValueString(),
-				Type:          configData.Type.ValueString(),
-				Ttl:           configData.Ttl.ValueInt64(),
+				Type:          planData.Type.ValueString(),
+				Ttl:           planData.Ttl.ValueInt64(),
 				Rrdatas:       configRrdatas,
 				RoutingPolicy: configRoutingPolicy,
 			},
@@ -517,7 +486,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 
 	tflog.Debug(ctx, fmt.Sprintf("DNS Record change request: %#v old: %#v new: %#v", chg, chg.Deletions[0], chg.Additions[0]))
 
-	chg, err := r.client.Changes.Create(configData.Project.ValueString(), stateData.ManagedZone.ValueString(), chg).Do()
+	chg, err := r.client.Changes.Create(planData.Project.ValueString(), stateData.ManagedZone.ValueString(), chg).Do()
 	if err != nil {
 		resp.Diagnostics.AddError(fmt.Sprintf("Error changing DNS RecordSet"), err.Error())
 		return
@@ -526,7 +495,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 	w := &DnsChangeWaiter{
 		Service:     r.client,
 		Change:      chg,
-		Project:     configData.Project.ValueString(),
+		Project:     planData.Project.ValueString(),
 		ManagedZone: stateData.ManagedZone.ValueString(),
 	}
 
@@ -536,8 +505,8 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 		return
 	}
 
-	stateData.Id = types.StringValue(fmt.Sprintf("projects/%s/managedZones/%s/rrsets/%s/%s",
-		configData.Project.ValueString(), stateData.ManagedZone.ValueString(), stateData.Name.ValueString(), configData.Type.ValueString()))
+	planData.Id = types.StringValue(fmt.Sprintf("projects/%s/managedZones/%s/rrsets/%s/%s",
+		planData.Project.ValueString(), stateData.ManagedZone.ValueString(), stateData.Name.ValueString(), planData.Type.ValueString()))
 
 	var clientResp *dns.ResourceRecordSetsListResponse
 	err = retry(func() error {
@@ -564,15 +533,15 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 
 	tflog.Trace(ctx, "read dns record set resource")
 
-	stateData.Type = types.StringValue(clientResp.Rrsets[0].Type)
-	stateData.Ttl = types.Int64Value(clientResp.Rrsets[0].Ttl)
-	stateData.Rrdatas, diags = types.ListValueFrom(ctx, types.StringType, clientResp.Rrsets[0].Rrdatas)
+	planData.Type = types.StringValue(clientResp.Rrsets[0].Type)
+	planData.Ttl = types.Int64Value(clientResp.Rrsets[0].Ttl)
+	planData.Rrdatas, diags = types.ListValueFrom(ctx, types.StringType, clientResp.Rrsets[0].Rrdatas)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	if clientResp.Rrsets[0].RoutingPolicy != nil {
-		stateData.RoutingPolicy, diags = types.ListValueFrom(ctx, stateData.RoutingPolicy.ElementType(ctx), []*dns.RRSetRoutingPolicy{clientResp.Rrsets[0].RoutingPolicy})
+		planData.RoutingPolicy, diags = types.ListValueFrom(ctx, planData.RoutingPolicy.ElementType(ctx), []*dns.RRSetRoutingPolicy{clientResp.Rrsets[0].RoutingPolicy})
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -580,7 +549,7 @@ func (r *GoogleDnsRecordSetResource) Update(ctx context.Context, req resource.Up
 	}
 
 	// Save data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &configData)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &planData)...)
 }
 
 func (r *GoogleDnsRecordSetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -782,7 +751,7 @@ func expandDnsRecordSetRrdata(ctx context.Context, configured types.List, diags 
 	return rrdatas
 }
 
-func expandDnsRecordSetRoutingPolicy(ctx context.Context, project types.String, p *frameworkProvider, configured types.List, diags *diag.Diagnostics) *dns.RRSetRoutingPolicy {
+func expandDnsRecordSetRoutingPolicy(ctx context.Context, p *frameworkProvider, project types.String, configured types.List, diags *diag.Diagnostics) *dns.RRSetRoutingPolicy {
 	var routingPolicyObject dns.RRSetRoutingPolicy
 	var routingPolicies []GoogleDnsRecordSetRoutingPolicyModel
 
@@ -828,7 +797,7 @@ func expandDnsRecordSetRoutingPolicy(ctx context.Context, project types.String, 
 	return &routingPolicyObject // unreachable here if ps is valid data
 }
 
-func expandDnsRecordSetRoutingPolicyWrrItems(ctx context.Context, project, configured types.List, diags *diag.Diagnostics) []*dns.RRSetRoutingPolicyWrrPolicyWrrPolicyItem {
+func expandDnsRecordSetRoutingPolicyWrrItems(ctx context.Context, p *frameworkProvider, project types.String, configured types.List, diags *diag.Diagnostics) []*dns.RRSetRoutingPolicyWrrPolicyWrrPolicyItem {
 	var policyItems []*dns.RRSetRoutingPolicyWrrPolicyWrrPolicyItem
 	var wrrItems []GoogleDnsRecordSetRoutingPolicyWrrModel
 
@@ -947,13 +916,13 @@ func expandDnsRecordSetHealthCheckedTargetsInternalLoadBalancerNetworkUrl(p *fra
 	if configured.IsNull() || configured.IsUnknown() {
 		return ""
 	} else if strings.HasPrefix(configured.ValueString(), "https://") {
-		return configured.ValueString(), nil
+		return configured.ValueString()
 	}
-	url := replaceVarsFramework(project, p.ComputeBasePath + configured.ValueString(), diags)
+	url := replaceVarsFramework(project, p.ComputeBasePath+configured.ValueString(), diags)
 	if diags.HasError() {
 		return ""
 	}
-	return tpgresource.ConvertSelfLinkToV1(url), nil
+	return tpgresource.ConvertSelfLinkToV1(url)
 }
 
 func expandDnsRecordSetRoutingPolicyPrimaryBackup(ctx context.Context, p *frameworkProvider, project types.String, configured types.List, diags *diag.Diagnostics) *dns.RRSetRoutingPolicyPrimaryBackupPolicy {
@@ -979,7 +948,7 @@ func expandDnsRecordSetRoutingPolicyPrimaryBackup(ctx context.Context, p *framew
 		EnableFencing: primaryBackup.EnableGeoFencingForBackups.ValueBool(),
 	}
 
-	backupObject.BackupGeoTargets.Items = expandDnsRecordSetRoutingPolicyGeoItems(ctx, primaryBackup.BackupGeo, diags)
+	backupObject.BackupGeoTargets.Items = expandDnsRecordSetRoutingPolicyGeoItems(ctx, p, project, primaryBackup.BackupGeo, diags)
 	if diags.HasError() {
 		return backupObject
 	}
@@ -987,92 +956,199 @@ func expandDnsRecordSetRoutingPolicyPrimaryBackup(ctx context.Context, p *framew
 	return backupObject
 }
 
-// func flattenDnsRecordSetRoutingPolicy(policy *dns.RRSetRoutingPolicy) []interface{} {
-// 	if policy == nil {
-// 		return []interface{}{}
-// 	}
-// 	ps := make([]interface{}, 0, 1)
-// 	p := make(map[string]interface{})
-// 	if policy.Wrr != nil {
-// 		p["wrr"] = flattenDnsRecordSetRoutingPolicyWRR(policy.Wrr)
-// 	}
-// 	if policy.Geo != nil {
-// 		p["geo"] = flattenDnsRecordSetRoutingPolicyGEO(policy.Geo)
-// 		p["enable_geo_fencing"] = policy.Geo.EnableFencing
-// 	}
-// 	if policy.PrimaryBackup != nil {
-// 		p["primary_backup"] = flattenDnsRecordSetRoutingPolicyPrimaryBackup(policy.PrimaryBackup)
-// 	}
-// 	return append(ps, p)
-// }
+func flattenDnsRecordSetRoutingPolicy(ctx context.Context, data types.List, policy *dns.RRSetRoutingPolicy, diags *diag.Diagnostics) types.List {
+	var policyObject types.List
+	var policyModel []GoogleDnsRecordSetRoutingPolicyModel
+	var d diag.Diagnostics
 
-// func flattenDnsRecordSetRoutingPolicyWRR(wrr *dns.RRSetRoutingPolicyWrrPolicy) []interface{} {
-// 	ris := make([]interface{}, 0, len(wrr.Items))
-// 	for _, item := range wrr.Items {
-// 		ri := make(map[string]interface{})
-// 		ri["weight"] = item.Weight
-// 		ri["rrdatas"] = item.Rrdatas
-// 		ri["health_checked_targets"] = flattenDnsRecordSetHealthCheckedTargets(item.HealthCheckedTargets)
-// 		ris = append(ris, ri)
-// 	}
-// 	return ris
-// }
+	fmt.Println("1")
+	d = data.ElementsAs(ctx, &policyModel, true)
+	diags.Append(d...)
+	if diags.HasError() {
+		return policyObject
+	}
 
-// func flattenDnsRecordSetRoutingPolicyGEO(geo *dns.RRSetRoutingPolicyGeoPolicy) []interface{} {
-// 	ris := make([]interface{}, 0, len(geo.Items))
-// 	for _, item := range geo.Items {
-// 		ri := make(map[string]interface{})
-// 		ri["location"] = item.Location
-// 		ri["rrdatas"] = item.Rrdatas
-// 		ri["health_checked_targets"] = flattenDnsRecordSetHealthCheckedTargets(item.HealthCheckedTargets)
-// 		ris = append(ris, ri)
-// 	}
-// 	return ris
-// }
+	policyData := policyModel[0]
 
-// func flattenDnsRecordSetHealthCheckedTargets(targets *dns.RRSetRoutingPolicyHealthCheckTargets) []map[string]interface{} {
-// 	if targets == nil {
-// 		return nil
-// 	}
+	fmt.Println("2")
+	policyData.Wrr = flattenDnsRecordSetRoutingPolicyWrr(ctx, policyData.Wrr, policy.Wrr.Items, diags)
+	diags.Append(d...)
+	if diags.HasError() {
+		return policyObject
+	}
 
-// 	data := map[string]interface{}{
-// 		"internal_load_balancers": flattenDnsRecordSetInternalLoadBalancers(targets.InternalLoadBalancers),
-// 	}
+	fmt.Println("3")
+	policyData.Geo = flattenDnsRecordSetRoutingPolicyGeo(ctx, policyData.Geo, policy.Geo.Items, diags)
+	diags.Append(d...)
+	if diags.HasError() {
+		return policyObject
+	}
 
-// 	return []map[string]interface{}{data}
-// }
+	fmt.Println("4")
+	policyData.PrimaryBackup = flattenDnsRecordSetRoutingPolicyPrimaryBackup(ctx, policyData.PrimaryBackup, policy.PrimaryBackup, diags)
+	diags.Append(d...)
+	if diags.HasError() {
+		return policyObject
+	}
 
-// func flattenDnsRecordSetInternalLoadBalancers(ilbs []*dns.RRSetRoutingPolicyLoadBalancerTarget) []map[string]interface{} {
-// 	ilbsSchema := make([]map[string]interface{}, 0, len(ilbs))
-// 	for _, ilb := range ilbs {
-// 		data := map[string]interface{}{
-// 			"load_balancer_type": ilb.LoadBalancerType,
-// 			"ip_address":         ilb.IpAddress,
-// 			"port":               ilb.Port,
-// 			"ip_protocol":        ilb.IpProtocol,
-// 			"network_url":        ilb.NetworkUrl,
-// 			"project":            ilb.Project,
-// 			"region":             ilb.Region,
-// 		}
-// 		ilbsSchema = append(ilbsSchema, data)
-// 	}
-// 	return ilbsSchema
-// }
+	fmt.Println("5")
+	policyObject, d = types.ListValueFrom(ctx, data.ElementType(ctx), policyModel)
+	diags.Append(d...)
+	if diags.HasError() {
+		return policyObject
+	}
 
-// func flattenDnsRecordSetRoutingPolicyPrimaryBackup(primaryBackup *dns.RRSetRoutingPolicyPrimaryBackupPolicy) []map[string]interface{} {
-// 	if primaryBackup == nil {
-// 		return nil
-// 	}
+	return policyObject
+}
 
-// 	data := map[string]interface{}{
-// 		"primary":                        flattenDnsRecordSetHealthCheckedTargets(primaryBackup.PrimaryTargets),
-// 		"trickle_ratio":                  primaryBackup.TrickleTraffic,
-// 		"backup_geo":                     flattenDnsRecordSetRoutingPolicyGEO(primaryBackup.BackupGeoTargets),
-// 		"enable_geo_fencing_for_backups": primaryBackup.BackupGeoTargets.EnableFencing,
-// 	}
+func flattenDnsRecordSetRoutingPolicyWrr(ctx context.Context, data types.List, wrrs []*dns.RRSetRoutingPolicyWrrPolicyWrrPolicyItem, diags *diag.Diagnostics) types.List {
+	if wrrs == nil || len(wrrs) == 0 {
+		return types.List{}
+	}
 
-// 	return []map[string]interface{}{data}
-// }
+	wrrModels := []GoogleDnsRecordSetRoutingPolicyWrrModel{}
+
+	d := data.ElementsAs(ctx, &wrrModels, true)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	for i, w := range wrrs {
+		rrdatas, d := types.ListValueFrom(ctx, types.StringType, w.Rrdatas)
+		diags.Append(d...)
+		if diags.HasError() {
+			return types.List{}
+		}
+
+		wrrModels = append(wrrModels, GoogleDnsRecordSetRoutingPolicyWrrModel{
+			Weight:               types.Float64Value(w.Weight),
+			Rrdatas:              rrdatas,
+			HealthCheckedTargets: flattenDnsRecordSetRoutingPolicyHealthCheckedTargets(ctx, wrrModels[i].HealthCheckedTargets, w.HealthCheckedTargets, diags),
+		})
+	}
+
+	fmt.Println("---")
+	fmt.Println(data.ElementType(ctx))
+	fmt.Println("---")
+	fmt.Println(wrrModels)
+	fmt.Println("---")
+
+	wrrList, d := types.ListValueFrom(ctx, data.ElementType(ctx), wrrModels)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	return wrrList
+}
+
+func flattenDnsRecordSetRoutingPolicyGeo(ctx context.Context, data types.List, geo []*dns.RRSetRoutingPolicyGeoPolicyGeoPolicyItem, diags *diag.Diagnostics) types.List {
+	var geoModels []GoogleDnsRecordSetRoutingPolicyGeoModel
+
+	d := data.ElementsAs(ctx, &geoModels, true)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	for i, g := range geo {
+		rrdatas, d := types.ListValueFrom(ctx, types.StringType, g.Rrdatas)
+		diags.Append(d...)
+		if diags.HasError() {
+			return types.List{}
+		}
+
+		geoModels = append(geoModels, GoogleDnsRecordSetRoutingPolicyGeoModel{
+			Location:             types.StringValue(g.Location),
+			Rrdatas:              rrdatas,
+			HealthCheckedTargets: flattenDnsRecordSetRoutingPolicyHealthCheckedTargets(ctx, geoModels[i].HealthCheckedTargets, g.HealthCheckedTargets, diags),
+		})
+	}
+
+	geoList, d := types.ListValueFrom(ctx, data.ElementType(ctx), geoModels)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	return geoList
+}
+
+func flattenDnsRecordSetRoutingPolicyHealthCheckedTargets(ctx context.Context, data types.List, target *dns.RRSetRoutingPolicyHealthCheckTargets, diags *diag.Diagnostics) types.List {
+	if target == nil || target.InternalLoadBalancers == nil {
+		return types.List{}
+	}
+
+	var targetModels []GoogleDnsRecordSetRoutingPolicyTargetModel
+
+	d := data.ElementsAs(ctx, &targetModels, true)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	ilbs := flattenDnsRecordSetRoutingPolicyHealthCheckedTargetILB(target.InternalLoadBalancers)
+	targetModels[0].InternalLoadBalancers, d = types.ListValueFrom(ctx, targetModels[0].InternalLoadBalancers.ElementType(ctx), ilbs)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	targets, d := types.ListValueFrom(ctx, data.ElementType(ctx), targetModels)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	return targets
+}
+
+func flattenDnsRecordSetRoutingPolicyHealthCheckedTargetILB(ilbs []*dns.RRSetRoutingPolicyLoadBalancerTarget) []GoogleDnsRecordSetRoutingPolicyTargetIlbModel {
+	var ilbModels []GoogleDnsRecordSetRoutingPolicyTargetIlbModel
+	if ilbs == nil || len(ilbs) == 0 {
+		return ilbModels
+	}
+
+	for _, ilb := range ilbs {
+		ilbModels = append(ilbModels, GoogleDnsRecordSetRoutingPolicyTargetIlbModel{
+			LoadBalancerType: types.StringValue(ilb.LoadBalancerType),
+			IpAddress:        types.StringValue(ilb.IpAddress),
+			Port:             types.StringValue(ilb.Port),
+			IpProtocol:       types.StringValue(ilb.IpProtocol),
+			NetworkUrl:       types.StringValue(ilb.NetworkUrl),
+			Project:          types.StringValue(ilb.Project),
+			Region:           types.StringValue(ilb.Region),
+		})
+	}
+
+	return ilbModels
+}
+
+func flattenDnsRecordSetRoutingPolicyPrimaryBackup(ctx context.Context, data types.List, primaryBackup *dns.RRSetRoutingPolicyPrimaryBackupPolicy, diags *diag.Diagnostics) types.List {
+	var pbModels []GoogleDnsRecordSetRoutingPolicyPrimaryBackupModel
+
+	d := data.ElementsAs(ctx, &pbModels, true)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	primaryBackupModel := GoogleDnsRecordSetRoutingPolicyPrimaryBackupModel{
+		TrickleRatio:               types.Float64Value(primaryBackup.TrickleTraffic),
+		EnableGeoFencingForBackups: types.BoolValue(primaryBackup.BackupGeoTargets.EnableFencing),
+		Primary:                    flattenDnsRecordSetRoutingPolicyHealthCheckedTargets(ctx, pbModels[0].Primary, primaryBackup.PrimaryTargets, diags),
+		BackupGeo:                  flattenDnsRecordSetRoutingPolicyGeo(ctx, pbModels[0].BackupGeo, primaryBackup.BackupGeoTargets.Items, diags),
+	}
+
+	pbList, d := types.ListValueFrom(ctx, data.ElementType(ctx), []GoogleDnsRecordSetRoutingPolicyPrimaryBackupModel{primaryBackupModel})
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.List{}
+	}
+
+	return pbList
+}
 
 // func rrdatasDnsDiffSuppress(k, old, new string, d *schema.ResourceData) bool {
 // 	if k == "rrdatas.#" && (new == "0" || new == "") && old != new {
