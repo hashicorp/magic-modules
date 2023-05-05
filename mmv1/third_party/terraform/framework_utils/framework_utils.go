@@ -7,15 +7,30 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-provider-google/google/tpgresource"
 	transport_tpg "github.com/hashicorp/terraform-provider-google/google/transport"
 )
 
+// var helpers
+
 const uaEnvVar = "TF_APPEND_USER_AGENT"
+
+var unhandledAsEmpty = basetypes.ObjectAsOptions{
+	UnhandledNullAsEmpty:    true,
+	UnhandledUnknownAsEmpty: true,
+}
+
+var unhandledAsError = basetypes.ObjectAsOptions{
+	UnhandledNullAsEmpty:    false,
+	UnhandledUnknownAsEmpty: false,
+}
 
 func CompileUserAgentString(ctx context.Context, name, tfVersion, provVersion string) string {
 	ua := fmt.Sprintf("Terraform/%s (+https://www.terraform.io) Terraform-Plugin-SDK/%s %s/%s", tfVersion, "terraform-plugin-framework", name, provVersion)
@@ -91,6 +106,16 @@ func handleDatasourceNotFoundError(ctx context.Context, err error, state *tfsdk.
 	diags.AddError(fmt.Sprintf("Error when reading or editing %s", resource), err.Error())
 }
 
+func handleResourceNotFoundError(ctx context.Context, err error, state *tfsdk.State, resource string, diags *diag.Diagnostics) {
+	if IsGoogleApiErrorWithCode(err, 404) {
+		tflog.Warn(ctx, fmt.Sprintf("Removing %s because it's gone", resource))
+		// The resource doesn't exist anymore
+		state.RemoveResource(ctx)
+	}
+
+	diags.AddError(fmt.Sprintf("Error when reading or editing %s", resource), err.Error())
+}
+
 // field helpers
 
 // Parses a project field with the following formats:
@@ -125,4 +150,15 @@ func parseProjectFieldValueFramework(resourceType, fieldValue, projectSchemaFiel
 
 		resourceType: resourceType,
 	}
+}
+
+// schema helpers
+
+// GetSchemaAttributeTypes returns a map[string]attr.Type representation of the given schema's attributes
+func GetSchemaAttributeTypes(sch schema.Schema) map[string]attr.Type {
+	attrTypes := map[string]attr.Type{}
+	for name, at := range sch.GetAttributes() {
+		attrTypes[name] = at.GetType()
+	}
+	return attrTypes
 }

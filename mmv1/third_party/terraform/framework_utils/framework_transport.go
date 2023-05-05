@@ -3,10 +3,13 @@ package google
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	transport_tpg "github.com/hashicorp/terraform-provider-google/google/transport"
 
 	"google.golang.org/api/googleapi"
@@ -100,4 +103,122 @@ func sendFrameworkRequestWithTimeout(p *frameworkProvider, method, project, rawu
 	}
 
 	return result, diags
+}
+
+func replaceVarsFramework(/* location LocationDescription, */ project types.String, linkTmpl string, diags *diag.Diagnostics) string {
+	return replaceVarsRecursiveFramework(/* location,  */ project, linkTmpl, false, 0, diags)
+}
+
+// ReplaceVars must be done recursively because there are baseUrls that can contain references to regions
+// (eg cloudrun service) there aren't any cases known for 2+ recursion but we will track a run away
+// substitution as 10+ calls to allow for future use cases.
+func replaceVarsRecursiveFramework(/* location LocationDescription, */ project types.String, linkTmpl string, shorten bool, depth int, diags *diag.Diagnostics) string {
+	if depth > 10 {
+		diags.AddError("Recursive substitution detected", fmt.Sprintf("depths is %d", depth))
+		return ""
+	}
+
+	// https://github.com/google/re2/wiki/Syntax
+	re := regexp.MustCompile("{{([%[:word:]]+)}}")
+	f := buildReplacementFunc(re, /* location,  */ project, linkTmpl, shorten, diags)
+	if diags.HasError() {
+		return ""
+	}
+	final := re.ReplaceAllStringFunc(linkTmpl, f)
+
+	if re.Match([]byte(final)) {
+		return replaceVarsRecursiveFramework(/* location,  */ project, final, shorten, depth+1)
+	}
+
+	return final
+}
+
+// This function replaces references to Terraform properties (in the form of {{var}}) with their value in Terraform
+// It also replaces {{project}}, {{project_id_or_project}}, {{region}}, and {{zone}} with their appropriate values
+// This function supports URL-encoding the result by prepending '%' to the field name e.g. {{%var}}
+func buildReplacementFunc(re *regexp.Regexp, /* location LocationDescription, */ project types.String, linkTmpl string, shorten bool) (func(string) string) {
+	// var region, zone string
+
+	// This option only seems to be necessary with the validator, I'm not sure the necessity of bringing it over
+	// into the framework version or not. (TODO: mbang)
+
+	// var ProjectID
+	// if strings.Contains(linkTmpl, "{{project_id_or_project}}") {
+	// 	v, ok := d.GetOkExists("project_id")
+	// 	if ok {
+	// 		projectID, _ = v.(string)
+	// 	}
+	// 	if projectID == "" {
+	// 		project, err = getProject(d, config)
+	// 	}
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
+
+	// if strings.Contains(linkTmpl, "{{region}}") {
+	// 	region, err = location.getRegion()
+	// 	if err != nil {
+	// 		diags.AddError("Error getting region", err.Error())
+	// 		return nil
+	// 	}
+	// }
+
+	// if strings.Contains(linkTmpl, "{{zone}}") {
+	// 	zone, err = location.getZone()
+	// 	if err != nil {
+	// 		diags.AddError("Error getting zone", err.Error())
+	// 		return nil
+	// 	}
+	// }
+
+	// if strings.Contains(linkTmpl, "{{location}}") {
+	// 	loc, err = location.getLocation()
+	// 	if err != nil {
+	// 		diags.AddError("Error getting location", err.Error())
+	// 		return nil
+	// 	}
+	// }
+
+	f := func(s string) string {
+
+		m := re.FindStringSubmatch(s)[1]
+		if m == "project" {
+			return project.ValueString()
+		}
+		// if m == "project_id_or_project" {
+		// 	if projectID != "" {
+		// 		return projectID
+		// 	}
+		// 	return project
+		// }
+		// if m == "region" {
+		// 	return region
+		// }
+		// if m == "zone" {
+		// 	return zone
+		// }
+		// if m == "location" {
+		// 	return loc
+		// }
+		// if string(m[0]) == "%" {
+		// 	v, ok := d.GetOkExists(m[1:])
+		// 	if ok {
+		// 		return url.PathEscape(fmt.Sprintf("%v", v))
+		// 	}
+		// } else {
+		// 	v, ok := d.GetOkExists(m)
+		// 	if ok {
+		// 		if shorten {
+		// 			return GetResourceNameFromSelfLink(fmt.Sprintf("%v", v))
+		// 		} else {
+		// 			return fmt.Sprintf("%v", v)
+		// 		}
+		// 	}
+		// }
+
+		return ""
+	}
+
+	return f
 }
