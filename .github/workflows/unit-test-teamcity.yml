@@ -68,8 +68,6 @@ jobs:
           cd .teamcity
           pwd
           ls
-          cd .teamcity
-          ls
           cd tests
           ls
           cd ..
