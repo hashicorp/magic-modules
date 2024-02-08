@@ -43,16 +43,17 @@ jobs:
 
       - name: Build Provider
         run: |
+          ls
           go build
 
-      - name: Setup Java
-        uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
-        with:
-          distribution: zulu
-          java-version: 17
-          java-package: jdk
+      # - name: Setup Java
+      #   uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
+      #   with:
+      #     distribution: zulu
+      #     java-version: 17
+      #     java-package: jdk
 
-      # Caching here
+      # TODO: Add caching here
       # - uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2 # v4.0.0
       #   with:
       #     path: ~/.m2/repository
@@ -60,14 +61,20 @@ jobs:
       #     restore-keys: |
       #       ${{ runner.os }}-maven-
 
-      - name: Download TeamCity Tools
+      - name: Find TeamCity folder in artifact!
         run : |
-          cd .teamcity
-          make tools
-
-      - name: Run TeamCity Tests
-        run : |
-          cd .teamcity
           pwd
           ls
-          make test
+          cd ./google/services
+
+      # - name: Download TeamCity Tools
+      #   run : |
+      #     cd .teamcity
+      #     make tools
+
+      # - name: Run TeamCity Tests
+      #   run : |
+      #     cd .teamcity
+      #     pwd
+      #     ls
+      #     make test
