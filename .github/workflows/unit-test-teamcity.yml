@@ -43,7 +43,6 @@ jobs:
 
       - name: Build Provider
         run: |
-          ls
           go build
 
       # - name: Setup Java
@@ -64,8 +63,13 @@ jobs:
       - name: Find TeamCity folder in artifact!
         run : |
           pwd
+          ls -a
+          echo "Going into .teamcity"
+          cd .teamcity
+          pwd
           ls
-          cd ./google/services
+          make tools
+
 
       # - name: Download TeamCity Tools
       #   run : |
