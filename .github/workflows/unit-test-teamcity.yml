@@ -42,14 +42,11 @@ jobs:
 
       - name: Download TeamCity Tools
         run : |
-          pwd
           cd .teamcity
-          pwd
           make tools
 
       - name: Run TeamCity Tests
         run : |
-          pwd
           cd .teamcity
-          pwd
+          make validate
           make test
