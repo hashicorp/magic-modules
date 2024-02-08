@@ -1,0 +1,71 @@
+name: TeamCity Unit Tests
+permissions: read-all
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        description: '??'
+        required: true
+        type: string
+
+jobs:
+  build-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v2
+        with:
+          name: artifact-${{ inputs.repo }}
+          path: artifacts
+
+      - name: Unzip the artifacts and delete the zip
+        run: |
+          unzip artifacts/output.zip -d ./
+          rm artifacts/output.zip
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '^1.20'
+
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-test-${{ inputs.repo }}-${{hashFiles('go.sum','google-*/transport/**','google-*/tpgresource/**','google-*/acctest/**','google-*/envvar/**','google-*/sweeper/**','google-*/verify/**') }}
+          restore-keys: |
+            ${{ runner.os }}-test-${{ inputs.repo }}-${{ hashFiles('go.sum') }}
+            ${{ runner.os }}-test-${{ inputs.repo }}-
+
+      - name: Build Provider
+        run: |
+          go build
+
+      - name: Setup Java
+        uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
+        with:
+          distribution: zulu
+          java-version: 17
+          java-package: jdk
+
+      # Caching here
+      # - uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2 # v4.0.0
+      #   with:
+      #     path: ~/.m2/repository
+      #     key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-maven-
+
+      - name: Download TeamCity Tools
+        run : |
+          cd .teamcity
+          make tools
+
+      - name: Run TeamCity Tests
+        run : |
+          cd .teamcity
+          make test
