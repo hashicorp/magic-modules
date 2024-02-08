@@ -68,6 +68,11 @@ jobs:
           cd .teamcity
           pwd
           ls
+          cd .teamcity
+          ls
+          cd .teamcity/tests
+          ls
+          cd ..
           make tools
 
 
