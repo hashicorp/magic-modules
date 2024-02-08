@@ -20,6 +20,6 @@ jobs:
   teamcity-unit-tests:
     name: teamcity-unit-tests
     needs: terraform-provider-google
-    uses: ./.github/workflows/unit-test-tpg.yml
+    uses: ./.github/workflows/unit-test-teamcity.yml
     with:
       repo: 'terraform-provider-google'
