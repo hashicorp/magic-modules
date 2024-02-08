@@ -70,7 +70,7 @@ jobs:
           ls
           cd .teamcity
           ls
-          cd .teamcity/tests
+          cd tests
           ls
           cd ..
           make tools
