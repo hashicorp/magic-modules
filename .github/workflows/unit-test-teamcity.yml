@@ -60,28 +60,16 @@ jobs:
       #     restore-keys: |
       #       ${{ runner.os }}-maven-
 
-      - name: Find TeamCity folder in artifact!
+      - name: Download TeamCity Tools
         run : |
           pwd
-          ls -a
-          echo "Going into .teamcity"
           cd .teamcity
           pwd
-          ls
-          cd tests
-          ls
-          cd ..
           make tools
 
-
-      # - name: Download TeamCity Tools
-      #   run : |
-      #     cd .teamcity
-      #     make tools
-
-      # - name: Run TeamCity Tests
-      #   run : |
-      #     cd .teamcity
-      #     pwd
-      #     ls
-      #     make test
+      - name: Run TeamCity Tests
+        run : |
+          pwd
+          cd .teamcity
+          pwd
+          make test
