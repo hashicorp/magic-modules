@@ -25,26 +25,6 @@ jobs:
           unzip artifacts/output.zip -d ./
           rm artifacts/output.zip
 
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '^1.20'
-
-      - name: Cache Go modules and build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-test-${{ inputs.repo }}-${{hashFiles('go.sum','google-*/transport/**','google-*/tpgresource/**','google-*/acctest/**','google-*/envvar/**','google-*/sweeper/**','google-*/verify/**') }}
-          restore-keys: |
-            ${{ runner.os }}-test-${{ inputs.repo }}-${{ hashFiles('go.sum') }}
-            ${{ runner.os }}-test-${{ inputs.repo }}-
-
-      - name: Build Provider
-        run: |
-          go build
-
       - name: Setup Java
         uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
         with:
