@@ -44,3 +44,4 @@ jobs:
           cd mmv1/third_party/terraform/.teamcity
           make validate
           make test
+          make test
