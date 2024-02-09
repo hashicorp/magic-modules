@@ -12,14 +12,33 @@ on:
 
 jobs:
 
-  terraform-provider-google:
-    uses: ./.github/workflows/build-downstream.yml
-    with:
-      repo: 'terraform-provider-google'
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-  teamcity-unit-tests:
-    name: teamcity-unit-tests
-    needs: terraform-provider-google
-    uses: ./.github/workflows/unit-test-teamcity.yml
-    with:
-      repo: 'terraform-provider-google'
+      - name: Setup Java
+        uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93 # v4.0.0
+        with:
+          distribution: zulu
+          java-version: 17
+          java-package: jdk
+
+      - name: Cache Maven files
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Download TeamCity Tools
+        run : |
+          cd mmv1/third_party/terraform/.teamcity
+          make tools
+
+      - name: Run TeamCity Tests
+        run : |
+          cd mmv1/third_party/terraform/.teamcity
+          make validate
+          make test
